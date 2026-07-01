@@ -7,15 +7,40 @@ const {
   canAccessPremiumContent,
 } = require('../utils/accessControl');
 
+function resolveStoredFilePath(storedPath) {
+  if (!storedPath) return null;
+
+  const candidates = [
+    storedPath,
+    path.resolve(storedPath),
+    path.join(process.cwd(), storedPath),
+    path.join(__dirname, '../../uploads', path.basename(storedPath)),
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return path.resolve(candidate);
+    }
+  }
+
+  return null;
+}
+
 function sanitizeDocument(doc, user) {
   const payload = doc.toObject ? doc.toObject() : { ...doc };
   const canView = canAccessPremiumContent(user);
+  const resolvedPath = resolveStoredFilePath(payload.filePath);
+
+  delete payload.filePath;
 
   if (!canView) {
-    delete payload.filePath;
     payload.locked = true;
+    payload.canPreview = false;
+    payload.fileAvailable = Boolean(resolvedPath);
   } else {
     payload.locked = false;
+    payload.canPreview = Boolean(resolvedPath);
+    payload.fileAvailable = Boolean(resolvedPath);
   }
 
   return payload;
@@ -129,23 +154,22 @@ exports.getDocument = async (req, res) => {
     }
 
     const access = await enforceDocumentAccess(req.user);
-    if (!access.allowed) {
-      return res.status(access.status).json({
-        success: false,
-        message: access.message,
-        data: sanitizeDocument(document, req.user),
-      });
-    }
 
-    await Document.findByIdAndUpdate(
-      req.params.id,
-      { $inc: { views: 1 } },
-      { new: true, runValidators: true }
-    );
+    if (access.allowed) {
+      await Document.findByIdAndUpdate(
+        req.params.id,
+        { $inc: { views: 1 } },
+        { new: true, runValidators: true }
+      );
+    }
 
     res.status(200).json({
       success: true,
       data: sanitizeDocument(document, req.user),
+      access: {
+        canView: access.allowed,
+        message: access.allowed ? null : access.message,
+      },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -238,20 +262,43 @@ exports.downloadDocument = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Document not found' });
     }
 
-    const absolutePath = path.resolve(document.filePath);
-    const inline = req.query.inline === '1' || req.query.inline === 'true';
-
-    if (inline) {
-      res.setHeader('Content-Type', document.fileType || 'application/octet-stream');
-      res.setHeader(
-        'Content-Disposition',
-        `inline; filename="${path.basename(absolutePath)}"`
-      );
-      return res.sendFile(absolutePath);
+    const absolutePath = resolveStoredFilePath(document.filePath);
+    if (!absolutePath) {
+      return res.status(404).json({
+        success: false,
+        message:
+          'Document file is missing on the server. Please ask an administrator to re-upload it.',
+      });
     }
 
-    res.download(absolutePath);
+    const inline = req.query.inline === '1' || req.query.inline === 'true';
+    const filename = path.basename(absolutePath);
+    const contentType = document.fileType || 'application/octet-stream';
+
+    if (inline) {
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+      return res.sendFile(absolutePath, (err) => {
+        if (err && !res.headersSent) {
+          res.status(500).json({
+            success: false,
+            message: 'Unable to open document file.',
+          });
+        }
+      });
+    }
+
+    return res.download(absolutePath, filename, (err) => {
+      if (err && !res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: 'Unable to download document file.',
+        });
+      }
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: error.message });
+    }
   }
 };
