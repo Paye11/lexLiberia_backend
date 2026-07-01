@@ -1,5 +1,17 @@
 const User = require('../models/User');
 const Plan = require('../models/Plan');
+const formatAuthUser = require('../utils/formatAuthUser');
+
+async function assignFreePlanIfMissing(user) {
+  if (user.plan) return user;
+
+  const freePlan = await Plan.findOne({ name: 'Free' });
+  if (!freePlan) return user;
+
+  user.plan = freePlan._id;
+  await user.save();
+  return user;
+}
 
 // @desc    Register a user
 // @route   POST /api/auth/register
@@ -30,13 +42,7 @@ exports.register = async (req, res) => {
     res.status(201).json({
       success: true,
       token,
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        plan: user.plan,
-      },
+      user: await formatAuthUser(user),
     });
   } catch (error) {
     res.status(500).json({
@@ -78,18 +84,13 @@ exports.login = async (req, res) => {
       });
     }
 
+    await assignFreePlanIfMissing(user);
     const token = user.getSignedJwtToken();
 
     res.status(200).json({
       success: true,
       token,
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        plan: user.plan,
-      },
+      user: await formatAuthUser(user),
     });
   } catch (error) {
     res.status(500).json({
@@ -104,11 +105,12 @@ exports.login = async (req, res) => {
 // @access  Private
 exports.getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).populate('plan');
+    const user = await User.findById(req.user._id);
+    await assignFreePlanIfMissing(user);
 
     res.status(200).json({
       success: true,
-      user,
+      user: await formatAuthUser(user),
     });
   } catch (error) {
     res.status(500).json({
