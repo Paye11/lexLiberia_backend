@@ -39,12 +39,11 @@ app.use(cors({
 
 app.use(express.json());
 
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
-
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/documents', require('./routes/documents'));
 app.use('/api/plans', require('./routes/plans'));
 app.use('/api/payments', require('./routes/payments'));
+app.use('/api/coupons', require('./routes/coupons'));
 app.use('/api/admin', require('./routes/admin'));
 
 app.get('/', (req, res) => {

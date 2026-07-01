@@ -2,59 +2,84 @@ const Document = require('../models/Document');
 const User = require('../models/User');
 const path = require('path');
 const fs = require('fs');
+const {
+  isAdmin,
+  canAccessPremiumContent,
+} = require('../utils/accessControl');
+
+function sanitizeDocument(doc, user) {
+  const payload = doc.toObject ? doc.toObject() : { ...doc };
+  const canView = canAccessPremiumContent(user);
+
+  if (!canView) {
+    delete payload.filePath;
+    payload.locked = true;
+  } else {
+    payload.locked = false;
+  }
+
+  return payload;
+}
 
 async function enforceDocumentAccess(user) {
   if (!user) {
-    return { allowed: false, status: 401, message: 'Please log in to view this document' };
-  }
-
-  if (user.role === 'admin') {
-    return { allowed: true };
-  }
-
-  const today = new Date().setHours(0, 0, 0, 0);
-  const lastView = new Date(user.lastViewDate).setHours(0, 0, 0, 0);
-  const isNewDay = today !== lastView;
-  const currentViews = isNewDay ? 0 : user.documentViewsToday;
-  const dailyLimit = user.plan?.dailyViewLimit ?? 0;
-
-  if (dailyLimit > 0 && currentViews >= dailyLimit) {
     return {
       allowed: false,
-      status: 403,
-      message: 'Daily document view limit reached for your current plan',
+      status: 401,
+      message: 'Please log in to view premium documents',
     };
   }
 
-  await User.findByIdAndUpdate(
-    user._id,
-    isNewDay
-      ? { documentViewsToday: 1, lastViewDate: Date.now() }
-      : { $inc: { documentViewsToday: 1 } },
-    { new: true, runValidators: true }
-  );
+  if (isAdmin(user)) {
+    return { allowed: true };
+  }
+
+  if (!canAccessPremiumContent(user)) {
+    return {
+      allowed: false,
+      status: 403,
+      message:
+        'Premium documents are available on paid plans only. Upgrade your account or redeem a coupon.',
+    };
+  }
+
+  const dailyLimit = user.plan?.dailyViewLimit ?? 0;
+  if (dailyLimit > 0) {
+    const today = new Date().setHours(0, 0, 0, 0);
+    const lastView = new Date(user.lastViewDate).setHours(0, 0, 0, 0);
+    const isNewDay = today !== lastView;
+    const currentViews = isNewDay ? 0 : user.documentViewsToday;
+
+    if (currentViews >= dailyLimit) {
+      return {
+        allowed: false,
+        status: 403,
+        message: 'Daily document view limit reached for your current plan',
+      };
+    }
+
+    await User.findByIdAndUpdate(
+      user._id,
+      isNewDay
+        ? { documentViewsToday: 1, lastViewDate: Date.now() }
+        : { $inc: { documentViewsToday: 1 } },
+      { new: true, runValidators: true }
+    );
+  }
 
   return { allowed: true };
 }
 
-// @desc    Get all documents
-// @route   GET /api/documents
-// @access  Public
 exports.getDocuments = async (req, res) => {
   try {
     let query;
     const reqQuery = { ...req.query };
     const removeFields = ['select', 'sort', 'page', 'limit'];
-    removeFields.forEach(param => delete reqQuery[param]);
+    removeFields.forEach((param) => delete reqQuery[param]);
     let queryStr = JSON.stringify(reqQuery);
-    queryStr = queryStr.replace(/\b(gt|gte|lt|lte|in)\b/g, match => `$${match}`);
+    queryStr = queryStr.replace(/\b(gt|gte|lt|lte|in)\b/g, (match) => `$${match}`);
 
     query = Document.find(JSON.parse(queryStr)).populate('uploadedBy', 'name email');
-
-    if (req.query.select) {
-      const fields = req.query.select.split(',').join(' ');
-      query = query.select(fields);
-    }
 
     if (req.query.sort) {
       const sortBy = req.query.sort.split(',').join(' ');
@@ -71,6 +96,7 @@ exports.getDocuments = async (req, res) => {
     query = query.skip(startIndex).limit(limit);
 
     const documents = await query;
+    const sanitized = documents.map((doc) => sanitizeDocument(doc, req.user));
     const pagination = {};
 
     if (endIndex < total) {
@@ -82,32 +108,33 @@ exports.getDocuments = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      count: documents.length,
+      count: sanitized.length,
       pagination,
-      data: documents,
+      data: sanitized,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Get single document
-// @route   GET /api/documents/:id
-// @access  Public
 exports.getDocument = async (req, res) => {
   try {
+    const document = await Document.findById(req.params.id).populate(
+      'uploadedBy',
+      'name email'
+    );
+
+    if (!document) {
+      return res.status(404).json({ success: false, message: 'Document not found' });
+    }
+
     const access = await enforceDocumentAccess(req.user);
     if (!access.allowed) {
       return res.status(access.status).json({
         success: false,
         message: access.message,
+        data: sanitizeDocument(document, req.user),
       });
-    }
-
-    const document = await Document.findById(req.params.id).populate('uploadedBy', 'name email');
-
-    if (!document) {
-      return res.status(404).json({ success: false, message: 'Document not found' });
     }
 
     await Document.findByIdAndUpdate(
@@ -116,15 +143,15 @@ exports.getDocument = async (req, res) => {
       { new: true, runValidators: true }
     );
 
-    res.status(200).json({ success: true, data: document });
+    res.status(200).json({
+      success: true,
+      data: sanitizeDocument(document, req.user),
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Upload a document
-// @route   POST /api/documents
-// @access  Private/Admin
 exports.uploadDocument = async (req, res) => {
   try {
     if (!req.file) {
@@ -149,9 +176,6 @@ exports.uploadDocument = async (req, res) => {
   }
 };
 
-// @desc    Update a document
-// @route   PUT /api/documents/:id
-// @access  Private/Admin
 exports.updateDocument = async (req, res) => {
   try {
     let document = await Document.findById(req.params.id);
@@ -160,11 +184,18 @@ exports.updateDocument = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Document not found' });
     }
 
-    document = await Document.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    );
+    const allowedFields = ['title', 'description', 'category'];
+    const updates = {};
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    });
+
+    document = await Document.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true,
+    });
 
     res.status(200).json({ success: true, data: document });
   } catch (error) {
@@ -172,9 +203,6 @@ exports.updateDocument = async (req, res) => {
   }
 };
 
-// @desc    Delete a document
-// @route   DELETE /api/documents/:id
-// @access  Private/Admin
 exports.deleteDocument = async (req, res) => {
   try {
     const document = await Document.findById(req.params.id);
@@ -195,9 +223,6 @@ exports.deleteDocument = async (req, res) => {
   }
 };
 
-// @desc    Download document
-// @route   GET /api/documents/download/:id
-// @access  Private
 exports.downloadDocument = async (req, res) => {
   try {
     const access = await enforceDocumentAccess(req.user);
@@ -212,6 +237,7 @@ exports.downloadDocument = async (req, res) => {
     if (!document) {
       return res.status(404).json({ success: false, message: 'Document not found' });
     }
+
     res.download(path.resolve(document.filePath));
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

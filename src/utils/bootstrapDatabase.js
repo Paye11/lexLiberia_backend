@@ -10,10 +10,10 @@ const defaultPlans = [
     features: [
       'Browse public laws & the Constitution',
       'Basic keyword search',
-      '2 document views per day',
       'Community support',
+      'Premium admin uploads require a paid plan',
     ],
-    dailyViewLimit: 2,
+    dailyViewLimit: 0,
   },
   {
     name: 'Student',
@@ -82,11 +82,15 @@ async function ensureAdminUser() {
   }
 
   const name = process.env.ADMIN_NAME || 'LexLiberia Admin';
+  const courtPlan = await Plan.findOne({ name: 'Court' });
   const existingAdmin = await User.findOne({ email });
 
   if (existingAdmin) {
     existingAdmin.name = name;
     existingAdmin.role = 'admin';
+    if (courtPlan) {
+      existingAdmin.plan = courtPlan._id;
+    }
     if (password) {
       existingAdmin.password = password;
     }
@@ -100,6 +104,7 @@ async function ensureAdminUser() {
     email,
     password,
     role: 'admin',
+    plan: courtPlan ? courtPlan._id : null,
   });
 
   console.log(`Admin user created: ${email}`);

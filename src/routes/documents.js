@@ -13,7 +13,7 @@ const upload = require('../middleware/upload');
 const router = express.Router();
 
 router.route('/')
-  .get(getDocuments)
+  .get(optionalAuth, getDocuments)
   .post(protect, authorize('admin'), upload.single('file'), uploadDocument);
 
 router.route('/download/:id')
