@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Plan = require('../models/Plan');
 const formatAuthUser = require('../utils/formatAuthUser');
+const downgradeExpiredPlan = require('../utils/downgradeExpiredPlan');
 
 async function assignFreePlanIfMissing(user) {
   if (user.plan) return user;
@@ -84,7 +85,15 @@ exports.login = async (req, res) => {
       });
     }
 
+    if (!user.isActive && user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been disabled. Contact support for help.',
+      });
+    }
+
     await assignFreePlanIfMissing(user);
+    await downgradeExpiredPlan(user);
     const token = user.getSignedJwtToken();
 
     res.status(200).json({
@@ -105,8 +114,9 @@ exports.login = async (req, res) => {
 // @access  Private
 exports.getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
+    let user = await User.findById(req.user._id);
     await assignFreePlanIfMissing(user);
+    user = await downgradeExpiredPlan(user);
 
     res.status(200).json({
       success: true,

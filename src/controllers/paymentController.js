@@ -41,7 +41,7 @@ exports.createPayment = async (req, res) => {
 
     await User.findByIdAndUpdate(
       req.user._id,
-      { plan: planId },
+      { plan: planId, planExpiresAt: endDate },
       { new: true, runValidators: true }
     );
 

@@ -33,6 +33,14 @@ const UserSchema = new mongoose.Schema(
       ref: 'Plan',
       default: null,
     },
+    planExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
     documentViewsToday: {
       type: Number,
       default: 0,

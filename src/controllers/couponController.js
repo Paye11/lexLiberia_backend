@@ -2,6 +2,7 @@ const Coupon = require('../models/Coupon');
 const Plan = require('../models/Plan');
 const User = require('../models/User');
 const formatAuthUser = require('../utils/formatAuthUser');
+const { getPlanExpiryDate } = require('../utils/planExpiry');
 
 exports.createCoupon = async (req, res) => {
   try {
@@ -124,6 +125,7 @@ exports.redeemCoupon = async (req, res) => {
 
     const user = await User.findById(req.user._id);
     user.plan = coupon.plan._id;
+    user.planExpiresAt = getPlanExpiryDate(coupon.plan.name);
     await user.save();
 
     coupon.usedCount += 1;
@@ -144,7 +146,9 @@ exports.redeemCoupon = async (req, res) => {
 
 exports.getAccessProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).populate('plan');
+    const downgradeExpiredPlan = require('../utils/downgradeExpiredPlan');
+    let user = await User.findById(req.user._id).populate('plan');
+    user = await downgradeExpiredPlan(user);
     const accessControl = require('../utils/accessControl');
 
     res.status(200).json({

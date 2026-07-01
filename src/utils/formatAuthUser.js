@@ -19,9 +19,12 @@ async function formatAuthUser(userDoc) {
     email: user.email,
     role: user.role,
     plan,
+    planExpiresAt: user.planExpiresAt ?? null,
+    isActive: user.isActive,
     access: {
       isAdmin: accessControl.isAdmin(user),
       hasPaidPlan: accessControl.hasPaidPlan(user),
+      isPlanExpired: accessControl.isPlanExpired(user),
       canViewPremiumDocuments: accessControl.canAccessPremiumContent(user),
       canUseAiResearch: accessControl.canUseAiResearch(user),
     },

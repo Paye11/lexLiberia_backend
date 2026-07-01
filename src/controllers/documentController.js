@@ -238,7 +238,19 @@ exports.downloadDocument = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Document not found' });
     }
 
-    res.download(path.resolve(document.filePath));
+    const absolutePath = path.resolve(document.filePath);
+    const inline = req.query.inline === '1' || req.query.inline === 'true';
+
+    if (inline) {
+      res.setHeader('Content-Type', document.fileType || 'application/octet-stream');
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${path.basename(absolutePath)}"`
+      );
+      return res.sendFile(absolutePath);
+    }
+
+    res.download(absolutePath);
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
