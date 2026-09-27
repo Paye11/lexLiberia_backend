@@ -34,6 +34,23 @@ const PaymentSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
+    momoReferenceId: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    phone: {
+      type: String,
+    },
+    chargedAmount: {
+      type: String,
+    },
+    momoFinancialId: {
+      type: String,
+    },
+    failureReason: {
+      type: String,
+    },
     status: {
       type: String,
       enum: ['pending', 'completed', 'failed', 'refunded'],
