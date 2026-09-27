@@ -47,6 +47,7 @@ app.use('/api/coupons', require('./routes/coupons'));
 app.use('/api/messages', require('./routes/messages'));
 app.use('/api/notices', require('./routes/notices'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/ai', require('./routes/ai'));
 
 app.get('/', (req, res) => {
   res.send('LexLiberia API is running!');

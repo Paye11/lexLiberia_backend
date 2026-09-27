@@ -51,6 +51,10 @@ const DocumentSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    textContent: {
+      type: String,
+      default: '',
+    },
   },
   {
     timestamps: true,

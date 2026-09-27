@@ -6,6 +6,7 @@ const {
   isAdmin,
   canAccessPremiumContent,
 } = require('../utils/accessControl');
+const extractDocumentText = require('../utils/extractDocumentText');
 
 function resolveStoredFilePath(storedPath) {
   if (!storedPath) return null;
@@ -32,6 +33,7 @@ function sanitizeDocument(doc, user) {
   const resolvedPath = resolveStoredFilePath(payload.filePath);
 
   delete payload.filePath;
+  delete payload.textContent;
 
   if (!canView) {
     payload.locked = true;
@@ -183,6 +185,7 @@ exports.uploadDocument = async (req, res) => {
     }
 
     const { title, description, category } = req.body;
+    const textContent = await extractDocumentText(req.file.path, req.file.mimetype);
 
     const document = await Document.create({
       title,
@@ -192,6 +195,7 @@ exports.uploadDocument = async (req, res) => {
       fileType: req.file.mimetype,
       fileSize: req.file.size,
       uploadedBy: req.user._id,
+      textContent,
     });
 
     res.status(201).json({ success: true, data: document });
