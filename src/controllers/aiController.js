@@ -93,7 +93,7 @@ function buildPrompt(question, documents) {
         .join('\n\n---\n\n')
     : 'No uploaded LexLiberia document matched this question.';
 
-  return `User question:\n${question}\n\nLaws stored on LexLiberia:\n${library}`;
+  return `User question:\n${question}\n\nPrimary source — laws uploaded on LexLiberia. Quote these first when they match:\n${library}\n\nThen search these official pages before any general web result:\n1. Supreme Court of Liberia opinions: https://judiciary.gov.lr/opinions/\n2. LiberLII: https://www.liberlii.org/\n\nAfter those, search the wider public web.`;
 }
 
 function readResponsesPayload(data) {
@@ -131,13 +131,13 @@ async function requestOpenAI(prompt, useWebSearch) {
   const body = {
     model,
     instructions:
-      'You are LexLiberia\'s legal research assistant. Search the public web for Liberian law, especially moj.gov.lr, supremecourt.gov.lr, liberlii.org, and other official Liberian legal sources. Also use the uploaded LexLiberia excerpts. When the user asks for a specific law, quote the relevant sections as fully as the sources allow, including section numbers and statutory wording, then add a short explanation. Do not invent citations, section numbers, or quotations. If the text was not found, say so.',
+      'You are LexLiberia\'s legal research assistant. Use sources in this order: (1) laws uploaded on LexLiberia, which are the primary source; (2) Supreme Court of Liberia opinions at https://judiciary.gov.lr/opinions/ ; (3) LiberLII at https://www.liberlii.org/ ; (4) the wider public web, the same kind of results a Google search would find. Search site:judiciary.gov.lr/opinions and site:liberlii.org before a general search. When the user asks for a specific law or opinion, quote the relevant text as fully as the sources allow, including section or case numbers, then add a short explanation. Label which source each quotation came from. Do not invent citations, section numbers, or quotations. If a source does not contain the text, say it was not found there.',
     input: prompt,
     max_output_tokens: 4000,
   };
 
   if (useWebSearch) {
-    body.tools = [{ type: 'web_search' }];
+    body.tools = [{ type: 'web_search', search_context_size: 'high' }];
   }
 
   const response = await fetch('https://api.openai.com/v1/responses', {
