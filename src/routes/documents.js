@@ -20,7 +20,7 @@ function acceptDocumentUpload(req, res, next) {
     }
 
     const message = error.code === 'LIMIT_FILE_SIZE'
-      ? 'One of the files is larger than 25 MB. Upload a smaller file.'
+      ? 'One of the files is larger than 75 MB. Upload a smaller file.'
       : error.message;
 
     res.status(400).json({ success: false, message });
