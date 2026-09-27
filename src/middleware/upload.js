@@ -20,9 +20,14 @@ const fileFilter = (req, file, cb) => {
   cb(new Error('Only PDF and Word documents are allowed'));
 };
 
+const configuredLimit = Number.parseInt(process.env.MAX_FILE_SIZE, 10);
+const maxFileSize = Number.isFinite(configuredLimit) && configuredLimit > 0
+  ? configuredLimit
+  : 10 * 1024 * 1024;
+
 const upload = multer({
   storage: storage,
-  limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) },
+  limits: { fileSize: maxFileSize },
   fileFilter: fileFilter,
 });
 
