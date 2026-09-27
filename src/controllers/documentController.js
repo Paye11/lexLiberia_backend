@@ -178,28 +178,96 @@ exports.getDocument = async (req, res) => {
   }
 };
 
+const DOCUMENT_CATEGORIES = [
+  'constitution',
+  'civil-procedure',
+  'criminal-procedure',
+  'penal',
+  'judiciary',
+  'property',
+  'labor',
+  'revenue',
+  'commercial',
+  'election',
+  'environmental',
+  'supreme-court-opinions',
+  'regulations',
+  'executive-orders',
+];
+
+function removeUploadedFile(filePath) {
+  if (filePath && fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+  }
+}
+
 exports.uploadDocument = async (req, res) => {
+  const files = Array.isArray(req.files) ? req.files : (req.file ? [req.file] : []);
+  const savedPaths = new Set();
+
   try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: 'Please upload a file' });
+    if (!files.length) {
+      return res.status(400).json({ success: false, message: 'Please upload at least one file' });
     }
 
-    const { title, description, category } = req.body;
-    const textContent = await extractDocumentText(req.file.path, req.file.mimetype);
+    let items = [];
+    if (req.body.items) {
+      items = JSON.parse(req.body.items);
+    } else if (files.length === 1) {
+      items = [{
+        title: req.body.title,
+        description: req.body.description,
+        category: req.body.category,
+      }];
+    }
 
-    const document = await Document.create({
-      title,
-      description,
-      category,
-      filePath: req.file.path,
-      fileType: req.file.mimetype,
-      fileSize: req.file.size,
-      uploadedBy: req.user._id,
-      textContent,
+    if (!Array.isArray(items) || items.length !== files.length) {
+      files.forEach((file) => removeUploadedFile(file.path));
+      return res.status(400).json({
+        success: false,
+        message: 'Choose a category for every file.',
+      });
+    }
+
+    const invalid = items.find((item) => !DOCUMENT_CATEGORIES.includes(item?.category) || !String(item?.title || '').trim());
+    if (invalid) {
+      files.forEach((file) => removeUploadedFile(file.path));
+      return res.status(400).json({
+        success: false,
+        message: 'Each file needs a title and a category.',
+      });
+    }
+
+    const created = [];
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const item = items[index];
+      const title = String(item.title).trim();
+      const description = String(item.description || title).trim();
+      const textContent = await extractDocumentText(file.path, file.mimetype);
+      const document = await Document.create({
+        title,
+        description,
+        category: item.category,
+        filePath: file.path,
+        fileType: file.mimetype,
+        fileSize: file.size,
+        uploadedBy: req.user._id,
+        textContent,
+      });
+      savedPaths.add(file.path);
+      created.push(document);
+    }
+
+    res.status(201).json({
+      success: true,
+      count: created.length,
+      data: created,
     });
-
-    res.status(201).json({ success: true, data: document });
   } catch (error) {
+    files.forEach((file) => {
+      if (!savedPaths.has(file.path)) removeUploadedFile(file.path);
+    });
     res.status(500).json({ success: false, message: error.message });
   }
 };

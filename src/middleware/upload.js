@@ -12,15 +12,12 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = /pdf|doc|docx/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
-
-  if (extname && mimetype) {
-    return cb(null, true);
-  } else {
-    return cb(new Error('Only PDF and Word documents are allowed'));
+  const extension = path.extname(file.originalname || '').toLowerCase();
+  if (['.pdf', '.doc', '.docx'].includes(extension)) {
+    cb(null, true);
+    return;
   }
+  cb(new Error('Only PDF and Word documents are allowed'));
 };
 
 const upload = multer({
