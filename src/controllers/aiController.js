@@ -1,6 +1,7 @@
 const Document = require('../models/Document');
 const { canUseAiResearch } = require('../utils/accessControl');
 const extractDocumentText = require('../utils/extractDocumentText');
+const { extractBufferText, isImageUpload } = extractDocumentText;
 
 const STOP_WORDS = new Set([
   'what', 'when', 'where', 'which', 'that', 'this', 'with', 'from', 'have',
@@ -83,7 +84,7 @@ async function findRelevantDocuments(question) {
   return results;
 }
 
-function buildPrompt(question, documents) {
+function buildPrompt(question, documents, pleadingText, hasImage) {
   const library = documents.length
     ? documents
         .map(
@@ -93,7 +94,15 @@ function buildPrompt(question, documents) {
         .join('\n\n---\n\n')
     : 'No uploaded LexLiberia document matched this question.';
 
-  return `User question:\n${question}\n\nPrimary source — laws uploaded on LexLiberia. Quote these first when they match:\n${library}\n\nThen search these official pages before any general web result:\n1. Supreme Court of Liberia opinions: https://judiciary.gov.lr/opinions/\n2. LiberLII: https://www.liberlii.org/\n\nAfter those, search the wider public web.`;
+  const pleadingBlock = pleadingText || hasImage
+    ? `\n\nSubscriber pleading to read and answer or draft from:\n${
+        pleadingText
+          ? pleadingText.slice(0, 50000)
+          : 'The pleading is in the attached image. Read the image.'
+      }\n`
+    : '';
+
+  return `User question:\n${question}${pleadingBlock}\n\nPrimary legal source — laws uploaded on LexLiberia. Quote these first when they match:\n${library}\n\nThen search these official pages before any general web result:\n1. Supreme Court of Liberia opinions: https://judiciary.gov.lr/opinions/\n2. LiberLII: https://www.liberlii.org/\n\nAfter those, search the wider public web.`;
 }
 
 function readResponsesPayload(data) {
@@ -126,13 +135,26 @@ function readResponsesPayload(data) {
   };
 }
 
-async function requestOpenAI(prompt, useWebSearch) {
+async function requestOpenAI(prompt, useWebSearch, images = []) {
   const model = process.env.OPENAI_MODEL || 'gpt-4.1';
   const body = {
     model,
     instructions:
-      'You are LexLiberia\'s legal research assistant. Use sources in this order: (1) laws uploaded on LexLiberia, which are the primary source; (2) Supreme Court of Liberia opinions at https://judiciary.gov.lr/opinions/ ; (3) LiberLII at https://www.liberlii.org/ ; (4) the wider public web, the same kind of results a Google search would find. Search site:judiciary.gov.lr/opinions and site:liberlii.org before a general search. When the user asks for a specific law or opinion, quote the relevant text as fully as the sources allow, including section or case numbers, then add a short explanation. Label which source each quotation came from. Do not invent citations, section numbers, or quotations. If a source does not contain the text, say it was not found there.',
-    input: prompt,
+      'You are LexLiberia\'s legal research assistant. If the subscriber attaches a pleading or a photo of a pleading, read the whole attachment first and answer or draft exactly what they asked, using the facts in that pleading. For the law, use sources in this order: (1) laws uploaded on LexLiberia; (2) Supreme Court of Liberia opinions at https://judiciary.gov.lr/opinions/ ; (3) LiberLII at https://www.liberlii.org/ ; (4) the wider public web. Search site:judiciary.gov.lr/opinions and site:liberlii.org before a general search. Quote relevant statutory or opinion text, with section or case numbers, and label the source. Do not invent citations, section numbers, or quotations. If a source does not contain the text, say it was not found there.',
+    input: images.length
+      ? [
+          {
+            role: 'user',
+            content: [
+              { type: 'input_text', text: prompt },
+              ...images.map((image) => ({
+                type: 'input_image',
+                image_url: image.dataUrl,
+              })),
+            ],
+          },
+        ]
+      : prompt,
     max_output_tokens: 4000,
   };
 
@@ -175,14 +197,40 @@ exports.research = async (req, res) => {
       });
     }
 
+    let pleadingText = '';
+    const images = [];
+
+    if (req.file) {
+      const imageUpload = isImageUpload(req.file.originalname, req.file.mimetype);
+      if (imageUpload) {
+        const mime = req.file.mimetype || 'image/jpeg';
+        images.push({
+          dataUrl: `data:${mime};base64,${req.file.buffer.toString('base64')}`,
+        });
+      }
+
+      pleadingText = await extractBufferText(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype,
+      );
+
+      if (!pleadingText && !imageUpload) {
+        return res.status(400).json({
+          success: false,
+          message: 'The file could not be read. Upload a PDF, a Word document, or a clear photo of the pleading.',
+        });
+      }
+    }
+
     const documents = await findRelevantDocuments(question);
-    const prompt = buildPrompt(question, documents);
-    let result = await requestOpenAI(prompt, true);
+    const prompt = buildPrompt(question, documents, pleadingText, images.length > 0);
+    let result = await requestOpenAI(prompt, true, images);
     let webSearchUsed = true;
 
     const toolError = JSON.stringify(result.data?.error || result.data || '');
     if (!result.ok && /tool|web_search/i.test(toolError)) {
-      result = await requestOpenAI(prompt, false);
+      result = await requestOpenAI(prompt, false, images);
       webSearchUsed = false;
     }
 
