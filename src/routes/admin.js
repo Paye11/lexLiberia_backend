@@ -14,6 +14,15 @@ const {
   getCoupons,
   deactivateCoupon,
 } = require('../controllers/couponController');
+const {
+  listProofs,
+  countPendingProofs,
+  proofScreenshot,
+  approveProof,
+  rejectProof,
+  pushPublicKey,
+  savePushSubscription,
+} = require('../controllers/paymentProofController');
 const { protect, authorize } = require('../middleware/auth');
 
 const router = express.Router();
@@ -28,6 +37,13 @@ router.delete('/users/:id', deleteUser);
 router.post('/messages', sendUserMessage);
 router.get('/notices', getAdminNotices);
 router.post('/notices', createNotice);
+router.get('/payment-proofs/count', countPendingProofs);
+router.get('/payment-proofs', listProofs);
+router.get('/payment-proofs/:id/screenshot', proofScreenshot);
+router.post('/payment-proofs/:id/approve', approveProof);
+router.post('/payment-proofs/:id/reject', rejectProof);
+router.get('/push/public-key', pushPublicKey);
+router.post('/push/subscribe', savePushSubscription);
 router.get('/coupons', getCoupons);
 router.post('/coupons', createCoupon);
 router.delete('/coupons/:id', deactivateCoupon);

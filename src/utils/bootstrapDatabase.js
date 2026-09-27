@@ -1,5 +1,6 @@
 const Plan = require('../models/Plan');
 const User = require('../models/User');
+const Payment = require('../models/Payment');
 
 const defaultPlans = [
   {
@@ -124,10 +125,35 @@ async function assignMissingFreePlans() {
   }
 }
 
+async function closeTestGatewayAccess() {
+  const freePlan = await Plan.findOne({ name: 'Free' });
+  const opened = await Payment.find({
+    paymentMethod: 'lonestar',
+    status: 'completed',
+  }).select('user');
+
+  const userIds = [...new Set(opened.map((payment) => String(payment.user)))];
+  if (freePlan && userIds.length > 0) {
+    const result = await User.updateMany(
+      { _id: { $in: userIds }, role: { $ne: 'admin' } },
+      { plan: freePlan._id, planExpiresAt: null }
+    );
+    if (result.modifiedCount > 0) {
+      console.log(`Closed test mobile-money access for ${result.modifiedCount} user(s).`);
+    }
+  }
+
+  await Payment.updateMany(
+    { paymentMethod: 'lonestar', status: { $in: ['completed', 'pending'] } },
+    { status: 'failed', failureReason: 'Mobile money test gateway closed' }
+  );
+}
+
 async function bootstrapDatabase() {
   await seedPlansIfEmpty();
   await ensureAdminUser();
   await assignMissingFreePlans();
+  await closeTestGatewayAccess();
 }
 
 module.exports = bootstrapDatabase;
