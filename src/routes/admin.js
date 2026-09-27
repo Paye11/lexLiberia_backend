@@ -22,6 +22,7 @@ const {
   rejectProof,
   pushPublicKey,
   savePushSubscription,
+  testPush,
 } = require('../controllers/paymentProofController');
 const { protect, authorize } = require('../middleware/auth');
 
@@ -44,6 +45,7 @@ router.post('/payment-proofs/:id/approve', approveProof);
 router.post('/payment-proofs/:id/reject', rejectProof);
 router.get('/push/public-key', pushPublicKey);
 router.post('/push/subscribe', savePushSubscription);
+router.post('/push/test', testPush);
 router.get('/coupons', getCoupons);
 router.post('/coupons', createCoupon);
 router.delete('/coupons/:id', deactivateCoupon);
