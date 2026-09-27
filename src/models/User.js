@@ -12,16 +12,20 @@ const UserSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Please add an email'],
       unique: true,
-      match: [
-        /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
-        'Please add a valid email',
-      ],
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Please add a valid email'],
     },
     password: {
       type: String,
-      required: [true, 'Please add a password'],
       minlength: 6,
       select: false,
+      required: function passwordRequired() {
+        return !this.googleId;
+      },
+    },
+    googleId: {
+      type: String,
+      unique: true,
+      sparse: true,
     },
     role: {
       type: String,
@@ -57,7 +61,7 @@ const UserSchema = new mongoose.Schema(
 
 // Encrypt password using bcrypt
 UserSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) {
+  if (!this.isModified('password') || !this.password) {
     return next();
   }
 
