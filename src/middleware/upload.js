@@ -23,7 +23,7 @@ const fileFilter = (req, file, cb) => {
 const configuredLimit = Number.parseInt(process.env.MAX_FILE_SIZE, 10);
 const maxFileSize = Number.isFinite(configuredLimit) && configuredLimit > 0
   ? configuredLimit
-  : 10 * 1024 * 1024;
+  : 25 * 1024 * 1024;
 
 const upload = multer({
   storage: storage,
