@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
-const { research } = require('../controllers/aiController');
+const { research, ask } = require('../controllers/aiController');
 const { protect } = require('../middleware/auth');
 
 const upload = multer({
@@ -38,5 +38,20 @@ router.post('/research', protect, (req, res, next) => {
     res.status(400).json({ success: false, message });
   });
 }, research);
+
+router.post('/ask', protect, (req, res, next) => {
+  upload.single('attachment')(req, res, (error) => {
+    if (!error) {
+      next();
+      return;
+    }
+
+    const message = error.code === 'LIMIT_FILE_SIZE'
+      ? 'The file is larger than 10 MB. Upload a smaller pleading.'
+      : error.message;
+
+    res.status(400).json({ success: false, message });
+  });
+}, ask);
 
 module.exports = router;

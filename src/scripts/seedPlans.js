@@ -33,7 +33,7 @@ const seedPlans = async () => {
           'Unlimited document views',
           'Supreme Court opinions access',
           'Bookmarks & downloads',
-          '50 AI research queries / month',
+          'AI Research and Ask Me',
         ],
         dailyViewLimit: 0,
       },
@@ -46,7 +46,7 @@ const seedPlans = async () => {
         features: [
           'Everything in Student',
           'Advanced filters & citations',
-          'Unlimited AI legal research',
+          'Unlimited AI Research and Ask Me',
           'Related cases & cross-references',
           'PDF export & print',
           'Priority support',

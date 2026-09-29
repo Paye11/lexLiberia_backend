@@ -253,13 +253,168 @@ exports.research = async (req, res) => {
         content: parsed.content,
         webSearchUsed,
         webSources: parsed.webSources,
-        citations: documents
-          .filter((document) => document.excerpt)
-          .map((document) => ({
-            title: document.title,
-            citation: document.category,
-            href: `/documents/${document.id}`,
-          })),
+        citations: documentCitations(documents),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+function documentCitations(documents) {
+  return documents
+    .filter((document) => document.excerpt)
+    .map((document) => ({
+      title: document.title,
+      citation: document.category,
+      href: `/documents/${document.id}`,
+    }));
+}
+
+function readPerplexityPayload(data) {
+  const content = String(data?.choices?.[0]?.message?.content || '').trim();
+  const webSources = [];
+
+  for (const item of data?.citations || []) {
+    if (typeof item === 'string' && item) {
+      webSources.push({ title: item, url: item });
+    } else if (item?.url) {
+      webSources.push({ title: item.title || item.url, url: item.url });
+    }
+  }
+
+  for (const item of data?.search_results || []) {
+    if (item?.url) {
+      webSources.push({ title: item.title || item.url, url: item.url });
+    }
+  }
+
+  const seen = new Set();
+  return {
+    content,
+    webSources: webSources.filter((source) => {
+      if (!source.url || seen.has(source.url)) return false;
+      seen.add(source.url);
+      return true;
+    }),
+  };
+}
+
+async function requestPerplexity(prompt, images = []) {
+  const model = process.env.PERPLEXITY_MODEL || 'sonar-pro';
+  const userContent = images.length
+    ? [
+        { type: 'text', text: prompt },
+        ...images.map((image) => ({
+          type: 'image_url',
+          image_url: { url: image.dataUrl },
+        })),
+      ]
+    : prompt;
+
+  const response = await fetch('https://api.perplexity.ai/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.PERPLEXITY_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are Ask Me, LexLiberia\'s search assistant for the admin and paid subscribers. If a pleading or photo is attached, read it first and answer or draft what was asked. For the law, use sources in this order: (1) the LexLiberia uploads included in the question; (2) Supreme Court of Liberia opinions at https://judiciary.gov.lr/opinions/ and the wider judiciary.gov.lr site; (3) LiberLII at https://www.liberlii.org/ ; (4) the wider public web, including other Liberian legal sites. Search those judiciary and LiberLII pages before a general search. Quote section or case text when a source contains it, and label the source with its link. Do not invent citations, section numbers, or quotations. If a source does not contain the text, say it was not found there.',
+        },
+        { role: 'user', content: userContent },
+      ],
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  return { ok: response.ok, status: response.status, data };
+}
+
+exports.ask = async (req, res) => {
+  try {
+    const question = String(req.body.question || '').trim();
+    if (!question) {
+      return res.status(400).json({ success: false, message: 'Please enter a question.' });
+    }
+    if (question.length > 4000) {
+      return res.status(400).json({ success: false, message: 'Please shorten the question.' });
+    }
+    if (!canUseAiResearch(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Ask Me is available to the admin and to subscribers on a paid plan.',
+      });
+    }
+    if (!process.env.PERPLEXITY_API_KEY) {
+      return res.status(503).json({
+        success: false,
+        message: 'Ask Me is not configured yet.',
+      });
+    }
+
+    let pleadingText = '';
+    const images = [];
+
+    if (req.file) {
+      const imageUpload = isImageUpload(req.file.originalname, req.file.mimetype);
+      if (imageUpload) {
+        const mime = req.file.mimetype || 'image/jpeg';
+        images.push({
+          dataUrl: `data:${mime};base64,${req.file.buffer.toString('base64')}`,
+        });
+      }
+
+      pleadingText = await extractBufferText(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype,
+      );
+
+      if (!pleadingText && !imageUpload) {
+        return res.status(400).json({
+          success: false,
+          message: 'The file could not be read. Upload a PDF, a Word document, or a clear photo of the pleading.',
+        });
+      }
+    }
+
+    const documents = await findRelevantDocuments(question);
+    const prompt = buildPrompt(question, documents, pleadingText, images.length > 0);
+    let result = await requestPerplexity(prompt, images);
+
+    if (!result.ok && images.length) {
+      result = await requestPerplexity(
+        `${prompt}\n\nA photo was attached, but it could not be sent to search. Answer from the question and the sources above.`,
+        [],
+      );
+    }
+
+    if (!result.ok) {
+      const message = result.data?.error?.message || 'Ask Me could not complete this search.';
+      return res.status(result.status || 502).json({ success: false, message });
+    }
+
+    const parsed = readPerplexityPayload(result.data);
+    if (!parsed.content) {
+      return res.status(502).json({
+        success: false,
+        message: 'Ask Me returned an empty answer. Please try the question again.',
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        content: parsed.content,
+        webSearchUsed: true,
+        webSources: parsed.webSources,
+        citations: documentCitations(documents),
       },
     });
   } catch (error) {

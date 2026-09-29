@@ -26,7 +26,7 @@ const defaultPlans = [
       'Unlimited document views',
       'Supreme Court opinions access',
       'Bookmarks & downloads',
-      '50 AI research queries / month',
+      'AI Research and Ask Me',
     ],
     dailyViewLimit: 0,
   },
@@ -39,7 +39,7 @@ const defaultPlans = [
     features: [
       'Everything in Student',
       'Advanced filters & citations',
-      'Unlimited AI legal research',
+      'Unlimited AI Research and Ask Me',
       'Related cases & cross-references',
       'PDF export & print',
       'Priority support',
@@ -149,8 +149,25 @@ async function closeTestGatewayAccess() {
   );
 }
 
+async function mentionAskMeOnPlans() {
+  const replacements = [
+    { name: 'Student', from: '50 AI research queries / month', to: 'AI Research and Ask Me' },
+    { name: 'Lawyer', from: 'Unlimited AI legal research', to: 'Unlimited AI Research and Ask Me' },
+  ];
+
+  for (const item of replacements) {
+    const plan = await Plan.findOne({ name: item.name });
+    if (!plan || !Array.isArray(plan.features)) continue;
+    if (!plan.features.includes(item.from)) continue;
+    plan.features = plan.features.map((feature) => (feature === item.from ? item.to : feature));
+    await plan.save();
+    console.log(`Updated ${item.name} plan features for Ask Me.`);
+  }
+}
+
 async function bootstrapDatabase() {
   await seedPlansIfEmpty();
+  await mentionAskMeOnPlans();
   await ensureAdminUser();
   await assignMissingFreePlans();
   await closeTestGatewayAccess();
