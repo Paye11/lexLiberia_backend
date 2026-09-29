@@ -272,8 +272,29 @@ function documentCitations(documents) {
 }
 
 function readPerplexityPayload(data) {
-  const content = String(data?.choices?.[0]?.message?.content || '').trim();
   const webSources = [];
+  const outputText = String(data?.output_text || '').trim();
+  const textParts = outputText ? [outputText] : [];
+
+  for (const item of data?.output || []) {
+    if (!outputText && item?.type === 'message') {
+      for (const content of item.content || []) {
+        if (content?.text) textParts.push(content.text);
+      }
+    }
+
+    const results = item?.type === 'search_results' ? item.results : [];
+    for (const result of results || []) {
+      if (result?.url) {
+        webSources.push({ title: result.title || result.url, url: result.url });
+      }
+    }
+  }
+
+  if (!textParts.length) {
+    const legacy = String(data?.choices?.[0]?.message?.content || '').trim();
+    if (legacy) textParts.push(legacy);
+  }
 
   for (const item of data?.citations || []) {
     if (typeof item === 'string' && item) {
@@ -291,7 +312,7 @@ function readPerplexityPayload(data) {
 
   const seen = new Set();
   return {
-    content,
+    content: textParts.join('\n\n').trim(),
     webSources: webSources.filter((source) => {
       if (!source.url || seen.has(source.url)) return false;
       seen.add(source.url);
@@ -300,35 +321,50 @@ function readPerplexityPayload(data) {
   };
 }
 
+function perplexityPreset() {
+  const setting = String(process.env.PERPLEXITY_MODEL || 'sonar-pro').trim().toLowerCase();
+  const presets = {
+    sonar: 'fast',
+    'sonar-pro': 'low',
+    'sonar-reasoning-pro': 'medium',
+    'sonar-deep-research': 'high',
+    fast: 'fast',
+    low: 'low',
+    medium: 'medium',
+    high: 'high',
+    xhigh: 'xhigh',
+  };
+  return presets[setting] || 'low';
+}
+
 async function requestPerplexity(prompt, images = []) {
-  const model = process.env.PERPLEXITY_MODEL || 'sonar-pro';
-  const userContent = images.length
+  const input = images.length
     ? [
-        { type: 'text', text: prompt },
-        ...images.map((image) => ({
-          type: 'image_url',
-          image_url: { url: image.dataUrl },
-        })),
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: prompt },
+            ...images.map((image) => ({
+              type: 'input_image',
+              image_url: image.dataUrl,
+            })),
+          ],
+        },
       ]
     : prompt;
 
-  const response = await fetch('https://api.perplexity.ai/chat/completions', {
+  const response = await fetch('https://api.perplexity.ai/v1/agent', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${process.env.PERPLEXITY_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are Ask Me, LexLiberia\'s search assistant for the admin and paid subscribers. If a pleading or photo is attached, read it first and answer or draft what was asked. For the law, use sources in this order: (1) the LexLiberia uploads included in the question; (2) Supreme Court of Liberia opinions at https://judiciary.gov.lr/opinions/ and the wider judiciary.gov.lr site; (3) LiberLII at https://www.liberlii.org/ ; (4) the wider public web, including other Liberian legal sites. Search those judiciary and LiberLII pages before a general search. Quote section or case text when a source contains it, and label the source with its link. Do not invent citations, section numbers, or quotations. If a source does not contain the text, say it was not found there.',
-        },
-        { role: 'user', content: userContent },
-      ],
+      preset: perplexityPreset(),
+      instructions:
+        'You are Ask Me, LexLiberia\'s search assistant for the admin and paid subscribers. If a pleading or photo is attached, read it first and answer or draft what was asked. For the law, use sources in this order: (1) the LexLiberia uploads included in the question; (2) Supreme Court of Liberia opinions at https://judiciary.gov.lr/opinions/ and the wider judiciary.gov.lr site; (3) LiberLII at https://www.liberlii.org/ ; (4) the wider public web, including other Liberian legal sites. Search those judiciary and LiberLII pages before a general search. Quote section or case text when a source contains it, and label the source with its link. Do not invent citations, section numbers, or quotations. If a source does not contain the text, say it was not found there.',
+      input,
+      max_output_tokens: 4000,
     }),
   });
 
@@ -396,7 +432,10 @@ exports.ask = async (req, res) => {
     }
 
     if (!result.ok) {
-      const message = result.data?.error?.message || 'Ask Me could not complete this search.';
+      const apiError = result.data?.error;
+      const message = (typeof apiError === 'string' ? apiError : apiError?.message)
+        || result.data?.message
+        || 'Ask Me could not complete this search.';
       return res.status(result.status || 502).json({ success: false, message });
     }
 
