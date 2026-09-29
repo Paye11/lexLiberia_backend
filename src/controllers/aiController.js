@@ -22,7 +22,7 @@ function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function excerpt(text, words, max = 3500) {
+function excerpt(text, words, max = 1800) {
   if (!text) return '';
   const lower = text.toLowerCase();
   let index = -1;
@@ -33,7 +33,7 @@ function excerpt(text, words, max = 3500) {
   });
 
   if (index === -1) return text.slice(0, max);
-  const start = Math.max(0, index - 600);
+  const start = Math.max(0, index - 300);
   return text.slice(start, start + max);
 }
 
@@ -126,7 +126,7 @@ function readResponsesPayload(data) {
 
   const seen = new Set();
   return {
-    content: parts.join('\n\n').trim(),
+    content: cleanAiOutput(parts.join('\n\n').trim()),
     webSources: webSources.filter((source) => {
       if (seen.has(source.url)) return false;
       seen.add(source.url);
@@ -135,12 +135,49 @@ function readResponsesPayload(data) {
   };
 }
 
+function cleanAiOutput(raw) {
+  let text = String(raw || '').trim();
+  if (!text) return '';
+
+  text = text.replace(/\r\n?/g, '\n');
+
+  text = text.replace(/\[\*\s*[0-9]+\s*\]/g, '');
+  text = text.replace(/\[\*\*[0-9]+\*\*\]/g, '');
+  text = text.replace(/\(\*\s*[0-9]+\s*\)/g, '');
+  text = text.replace(/^\s*\(\*\*[^)]*\*\*\)\s*$/gm, '');
+  text = text.replace(/\[search result[^\]]*\]/gi, '');
+  text = text.replace(/\[source[^\]]*\]/gi, '');
+  text = text.replace(/\[citation[^\]]*\]/gi, '');
+
+  text = text.replace(/\\\*/g, '*');
+  text = text.replace(/\\_/g, '_');
+  text = text.replace(/\\#/g, '#');
+  text = text.replace(/\\-/g, '-');
+  text = text.replace(/\\\)/g, ')');
+  text = text.replace(/\\\(/g, '(');
+  text = text.replace(/\\\[/g, '[');
+  text = text.replace(/\\\]/g, ']');
+  text = text.replace(/\s+\\\./g, '.');
+
+  text = text.replace(/^[ \t]+(\S)/gm, '$1');
+
+  let prev;
+  do {
+    prev = text;
+    text = text.replace(/\n{3,}/g, '\n\n');
+  } while (text !== prev);
+
+  text = text.replace(/\n\s*\*\s*\n/g, '\n\n');
+
+  return text.trim();
+}
+
 async function requestOpenAI(prompt, useWebSearch, images = []) {
   const model = process.env.OPENAI_MODEL || 'gpt-4.1';
   const body = {
     model,
     instructions:
-      'You are LexLiberia\'s legal research assistant. If the subscriber attaches a pleading or a photo of a pleading, read the whole attachment first and answer or draft exactly what they asked, using the facts in that pleading. For the law, use sources in this order: (1) laws uploaded on LexLiberia; (2) Supreme Court of Liberia opinions at https://judiciary.gov.lr/opinions/ ; (3) LiberLII at https://www.liberlii.org/ ; (4) the wider public web. Search site:judiciary.gov.lr/opinions and site:liberlii.org before a general search. Quote relevant statutory or opinion text, with section or case numbers, and label the source. Do not invent citations, section numbers, or quotations. If a source does not contain the text, say it was not found there.',
+      'You are LexLiberia\'s legal research assistant. If the subscriber attaches a pleading or a photo of a pleading, read the whole attachment first and answer or draft exactly what they asked, using the facts in that pleading. For the law, use sources in this order: (1) laws uploaded on LexLiberia; (2) Supreme Court of Liberia opinions at https://judiciary.gov.lr/opinions/ ; (3) LiberLII at https://www.liberlii.org/ ; (4) the wider public web. Search site:judiciary.gov.lr/opinions and site:liberlii.org before a general search. Quote relevant statutory or opinion text, with section or case numbers, and label the source. Do not invent citations, section numbers, or quotations. If a source does not contain the text, say it was not found there. CRITICAL FORMATTING RULES (follow exactly): (a) write in clean, natural paragraphs like ChatGPT does — no backslash escapes, no bare `(*x*)` or `[*x*]` tokens, no search-engine noise inside the answer; (b) use standard Markdown for structure: `##` for headings, `###` for subheadings, `-` for bullet lists, `1.` for numbered lists, `**bold**` for emphasis, and clean paragraphs; (c) use `> ` blockquotes when quoting a statute or judgment passage directly; (d) place citations and links at the END of the answer in a "Sources" section (one source per line), NEVER embed citation markers like [1] or (*1*) inside the main body paragraphs; (e) if you use a table, keep it simple (Header | Header / --- | --- / cell | cell) and do not escape the pipes.',
     input: images.length
       ? [
           {
@@ -312,7 +349,7 @@ function readPerplexityPayload(data) {
 
   const seen = new Set();
   return {
-    content: textParts.join('\n\n').trim(),
+    content: cleanAiOutput(textParts.join('\n\n').trim()),
     webSources: webSources.filter((source) => {
       if (!source.url || seen.has(source.url)) return false;
       seen.add(source.url);
@@ -326,8 +363,8 @@ function perplexityPreset() {
   const presets = {
     sonar: 'fast',
     'sonar-pro': 'low',
-    'sonar-reasoning-pro': 'medium',
-    'sonar-deep-research': 'high',
+    'sonar-reasoning-pro': 'low',
+    'sonar-deep-research': 'low',
     fast: 'fast',
     low: 'low',
     medium: 'medium',
@@ -362,7 +399,7 @@ async function requestPerplexity(prompt, images = []) {
     body: JSON.stringify({
       preset: perplexityPreset(),
       instructions:
-        'You are Ask Me, LexLiberia\'s search assistant for the admin and paid subscribers. If a pleading or photo is attached, read it first and answer or draft what was asked. For the law, use sources in this order: (1) the LexLiberia uploads included in the question; (2) Supreme Court of Liberia opinions at https://judiciary.gov.lr/opinions/ and the wider judiciary.gov.lr site; (3) LiberLII at https://www.liberlii.org/ ; (4) the wider public web, including other Liberian legal sites. Search those judiciary and LiberLII pages before a general search. Quote section or case text when a source contains it, and label the source with its link. Do not invent citations, section numbers, or quotations. If a source does not contain the text, say it was not found there.',
+        'You are Ask Me, LexLiberia\'s search assistant for the admin and paid subscribers. If a pleading or photo is attached, read it first and answer or draft what was asked. For the law, use sources in this order: (1) the LexLiberia uploads included in the question; (2) Supreme Court of Liberia opinions at https://judiciary.gov.lr/opinions/ and the wider judiciary.gov.lr site; (3) LiberLII at https://www.liberlii.org/ ; (4) the wider public web, including other Liberian legal sites. Search those judiciary and LiberLII pages before a general search. Quote section or case text when a source contains it, and label the source with its link. Do not invent citations, section numbers, or quotations. If a source does not contain the text, say it was not found there. CRITICAL FORMATTING RULES (follow exactly): (a) write in clean, natural paragraphs like ChatGPT does — NEVER output backslash escapes, never output `(*1*)` or `[*1*]` search tokens, never put noisy search markers inside the answer text; (b) use standard Markdown: `##` for headings, `###` for subheadings, `-` for bullets, `1.` for numbered lists, `**bold**` for emphasis, clean paragraphs; (c) use `> ` blockquotes when quoting a statute or judgment passage directly; (d) place citations and links at the END of the answer in a "Sources" section (one source per line), NEVER embed citation markers like [1] or (*1*) inside the main body paragraphs; (e) keep tables simple and do not escape the pipe `|` character.',
       input,
       max_output_tokens: 4000,
     }),
