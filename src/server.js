@@ -66,7 +66,11 @@ const PORT = process.env.PORT || 5000;
 
 async function startServer() {
   await connectDB();
-  await bootstrapDatabase();
+  try {
+    await bootstrapDatabase();
+  } catch (bootstrapErr) {
+    console.error('Non-fatal bootstrapDatabase warning — server will continue starting:', bootstrapErr && bootstrapErr.message ? bootstrapErr.message : bootstrapErr);
+  }
 
   app.listen(PORT, () => {
     console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);

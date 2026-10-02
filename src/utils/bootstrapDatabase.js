@@ -163,10 +163,66 @@ async function seedDefaultCategories() {
   const currentAdmin = await User.findOne({ role: 'admin' }).select('_id').lean();
   const createdBy = currentAdmin?._id || null;
 
-  let created = 0;
+  let added = 0;
+  let updated = 0;
   for (const seed of DEFAULT_CATEGORIES) {
-    const exists = await Category.findOne({ slug: seed.slug }).lean();
-    if (exists) continue;
+    // Find any existing row for this logical category — either by exact legacy slug
+    // OR by exact display name. This covers any prior partial/incorrectly-slugified seed
+    // rows that were created with the wrong slug (e.g. "civil-procedure-law") before
+    // the pre-save hook was tightened to preserve explicit slugs.
+    const existing = await Category.findOne({
+      $or: [{ slug: seed.slug }, { name: seed.name }],
+    });
+
+    if (existing) {
+      let dirty = false;
+      // Normalize slug to the legacy canonical one — repair any bad rows
+      if (String(existing.slug) !== String(seed.slug)) {
+        existing.slug = seed.slug;
+        dirty = true;
+      }
+      if (!existing.description || existing.description === '') {
+        existing.description = seed.description || '';
+        dirty = true;
+      }
+      if (typeof seed.order === 'number' && existing.order !== seed.order) {
+        existing.order = seed.order;
+        dirty = true;
+      }
+      if (!existing.isActive) {
+        existing.isActive = true;
+        dirty = true;
+      }
+      if (!existing.createdBy && createdBy) {
+        existing.createdBy = createdBy;
+        dirty = true;
+      }
+      if (!existing.name || existing.name !== seed.name) {
+        existing.name = seed.name;
+        dirty = true;
+      }
+      if (dirty) {
+        try {
+          await existing.save();
+          updated += 1;
+        } catch (saveErr) {
+          // If the save fails on a duplicate-slug conflict (another row already
+          // holds the canonical slug because we had both a good and a corrupt
+          // row for the same category in the DB), keep the canonical one and
+          // drop the duplicate by marking it for deletion later.
+          if (saveErr && saveErr.code === 11000) {
+            console.log(
+              `[bootstrap] duplicate slug row for "${seed.slug}" — removing the extra stale category.`,
+            );
+            await Category.deleteOne({ _id: existing._id });
+          } else {
+            throw saveErr;
+          }
+        }
+      }
+      continue;
+    }
+
     await Category.create({
       name: seed.name,
       slug: seed.slug,
@@ -175,13 +231,15 @@ async function seedDefaultCategories() {
       isActive: true,
       createdBy,
     });
-    created += 1;
+    added += 1;
   }
 
-  if (created > 0) {
-    console.log(`Default categories seeded (${created} added).`);
+  if (added > 0 || updated > 0) {
+    console.log(
+      `Default categories seeded (${added} added, ${updated} corrected).`,
+    );
   } else {
-    console.log('Default categories already present.');
+    console.log('Default categories already present and in good state.');
   }
 }
 
