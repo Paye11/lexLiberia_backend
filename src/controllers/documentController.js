@@ -1,5 +1,6 @@
 const Document = require('../models/Document');
 const User = require('../models/User');
+const Category = require('../models/Category');
 const path = require('path');
 const fs = require('fs');
 const {
@@ -195,6 +196,59 @@ const DOCUMENT_CATEGORIES = [
   'executive-orders',
 ];
 
+let categorySlugCache = null;
+let categoryCacheFetchedAt = 0;
+const CATEGORY_CACHE_TTL_MS = 60 * 1000;
+
+async function getAllCategorySlugs() {
+  const now = Date.now();
+  if (categorySlugCache && now - categoryCacheFetchedAt < CATEGORY_CACHE_TTL_MS) {
+    return categorySlugCache;
+  }
+  const rows = await Category.find().select('slug isActive').lean();
+  categorySlugCache = new Set(
+    rows.filter((row) => row.isActive !== false).map((row) => row.slug),
+  );
+  rows.forEach((row) => categorySlugCache.add(row.slug));
+  DOCUMENT_CATEGORIES.forEach((slug) => categorySlugCache.add(slug));
+  categoryCacheFetchedAt = now;
+  return categorySlugCache;
+}
+
+function invalidateCategoryCache() {
+  categorySlugCache = null;
+  categoryCacheFetchedAt = 0;
+}
+
+exports._invalidateCategoryCache = invalidateCategoryCache;
+
+async function resolveCategory(slugCandidate) {
+  const raw = String(slugCandidate || '').trim();
+  if (!raw) return null;
+
+  const slug = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  if (!slug) return null;
+
+  const exact = await Category.findOne({ $or: [{ slug: raw }, { slug }, { name: raw }] }).lean();
+  if (exact) {
+    return { slug: exact.slug, categoryId: exact._id };
+  }
+
+  if (DOCUMENT_CATEGORIES.includes(raw) || DOCUMENT_CATEGORIES.includes(slug)) {
+    return { slug: DOCUMENT_CATEGORIES.includes(raw) ? raw : slug, categoryId: null };
+  }
+
+  if (/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(slug)) {
+    return { slug, categoryId: null };
+  }
+
+  return null;
+}
+
 function removeUploadedFile(filePath) {
   if (filePath && fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
@@ -229,7 +283,7 @@ exports.uploadDocument = async (req, res) => {
       });
     }
 
-    const invalid = items.find((item) => !DOCUMENT_CATEGORIES.includes(item?.category) || !String(item?.title || '').trim());
+    const invalid = items.find((item) => !item?.category || !String(item?.title || '').trim());
     if (invalid) {
       files.forEach((file) => removeUploadedFile(file.path));
       return res.status(400).json({
@@ -244,11 +298,22 @@ exports.uploadDocument = async (req, res) => {
       const item = items[index];
       const title = String(item.title).trim();
       const description = String(item.description || title).trim();
+      const resolved = await resolveCategory(item.category);
+      if (!resolved) {
+        files.forEach((f) => {
+          if (!savedPaths.has(f.path)) removeUploadedFile(f.path);
+        });
+        return res.status(400).json({
+          success: false,
+          message: `Invalid category selected for ${title}.`,
+        });
+      }
       const textContent = await extractDocumentText(file.path, file.mimetype);
       const document = await Document.create({
         title,
         description,
-        category: item.category,
+        category: resolved.slug,
+        categoryId: resolved.categoryId || null,
         filePath: file.path,
         fileType: file.mimetype,
         fileSize: file.size,
@@ -287,6 +352,15 @@ exports.updateDocument = async (req, res) => {
         updates[field] = req.body[field];
       }
     });
+
+    if (updates.category !== undefined) {
+      const resolved = await resolveCategory(updates.category);
+      if (!resolved) {
+        return res.status(400).json({ success: false, message: 'Invalid category.' });
+      }
+      updates.category = resolved.slug;
+      updates.categoryId = resolved.categoryId || null;
+    }
 
     document = await Document.findByIdAndUpdate(req.params.id, updates, {
       new: true,

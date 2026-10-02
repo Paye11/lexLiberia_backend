@@ -1,6 +1,7 @@
 const Plan = require('../models/Plan');
 const User = require('../models/User');
 const Payment = require('../models/Payment');
+const Category = require('../models/Category');
 
 const defaultPlans = [
   {
@@ -141,6 +142,49 @@ async function assignMissingFreePlans() {
   }
 }
 
+const DEFAULT_CATEGORIES = [
+  { name: 'Constitution', slug: 'constitution', order: 1, description: 'The 1986 Constitution of the Republic of Liberia and amendments.' },
+  { name: 'Civil Procedure Law', slug: 'civil-procedure', order: 2, description: 'Rules governing civil proceedings in Liberian courts.' },
+  { name: 'Criminal Procedure Law', slug: 'criminal-procedure', order: 3, description: 'Rules governing criminal proceedings and prosecutions.' },
+  { name: 'Penal Law', slug: 'penal', order: 4, description: 'Criminal offenses, punishments, and penal code provisions.' },
+  { name: 'Judiciary Law', slug: 'judiciary', order: 5, description: 'Laws establishing and regulating the judiciary and courts.' },
+  { name: 'Property Law', slug: 'property', order: 6, description: 'Real property, land tenure, and ownership laws.' },
+  { name: 'Labor Law', slug: 'labor', order: 7, description: 'Employment relations, workers rights, and labor standards.' },
+  { name: 'Revenue Code', slug: 'revenue', order: 8, description: 'Taxation, customs duties, and revenue administration.' },
+  { name: 'Commercial Law', slug: 'commercial', order: 9, description: 'Business, commerce, companies, and trade regulations.' },
+  { name: 'Election Law', slug: 'election', order: 10, description: 'Elections, voter registration, and political parties.' },
+  { name: 'Environmental Law', slug: 'environmental', order: 11, description: 'Environmental protection, natural resources, and climate.' },
+  { name: 'Supreme Court Opinions', slug: 'supreme-court-opinions', order: 12, description: 'Published opinions and judgments of the Supreme Court of Liberia.' },
+  { name: 'Regulations', slug: 'regulations', order: 13, description: 'Delegated legislation, ministerial regulations, and agency rules.' },
+  { name: 'Executive Orders', slug: 'executive-orders', order: 14, description: 'Orders and directives issued by the President of Liberia.' },
+];
+
+async function seedDefaultCategories() {
+  const currentAdmin = await User.findOne({ role: 'admin' }).select('_id').lean();
+  const createdBy = currentAdmin?._id || null;
+
+  let created = 0;
+  for (const seed of DEFAULT_CATEGORIES) {
+    const exists = await Category.findOne({ slug: seed.slug }).lean();
+    if (exists) continue;
+    await Category.create({
+      name: seed.name,
+      slug: seed.slug,
+      description: seed.description || '',
+      order: typeof seed.order === 'number' ? seed.order : 0,
+      isActive: true,
+      createdBy,
+    });
+    created += 1;
+  }
+
+  if (created > 0) {
+    console.log(`Default categories seeded (${created} added).`);
+  } else {
+    console.log('Default categories already present.');
+  }
+}
+
 async function closeTestGatewayAccess() {
   const freePlan = await Plan.findOne({ name: 'Free' });
   const opened = await Payment.find({
@@ -183,6 +227,7 @@ async function mentionAskMeOnPlans() {
 
 async function bootstrapDatabase() {
   await seedPlansIfEmpty();
+  await seedDefaultCategories();
   await mentionAskMeOnPlans();
   await ensureAdminUser();
   await assignMissingFreePlans();

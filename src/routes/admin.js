@@ -24,6 +24,13 @@ const {
   savePushSubscription,
   testPush,
 } = require('../controllers/paymentProofController');
+const {
+  listCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  categoryStats,
+} = require('../controllers/categoryController');
 const { protect, authorize } = require('../middleware/auth');
 
 const router = express.Router();
@@ -49,5 +56,15 @@ router.post('/push/test', testPush);
 router.get('/coupons', getCoupons);
 router.post('/coupons', createCoupon);
 router.delete('/coupons/:id', deactivateCoupon);
+
+router.get('/categories', (req, res, next) => {
+  req.query.includeInactive = 'true';
+  next();
+}, listCategories);
+router.get('/categories/stats', categoryStats);
+router.post('/categories', createCategory);
+router.put('/categories/:id', updateCategory);
+router.patch('/categories/:id', updateCategory);
+router.delete('/categories/:id', deleteCategory);
 
 module.exports = router;
