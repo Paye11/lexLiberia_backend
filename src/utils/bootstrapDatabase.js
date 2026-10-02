@@ -77,38 +77,54 @@ async function ensureAdminUser() {
   const email = process.env.ADMIN_EMAIL;
   const password = process.env.ADMIN_PASSWORD;
 
-  if (!email || !password) {
+  if (!password || !email) {
     console.log('ADMIN_EMAIL or ADMIN_PASSWORD not set — skipping admin bootstrap.');
     return;
   }
 
   const name = process.env.ADMIN_NAME || 'LexLiberia Admin';
   const courtPlan = await Plan.findOne({ name: 'Court' });
-  const existingAdmin = await User.findOne({ email });
 
-  if (existingAdmin) {
-    existingAdmin.name = name;
-    existingAdmin.role = 'admin';
-    if (courtPlan) {
-      existingAdmin.plan = courtPlan._id;
-    }
-    if (password) {
-      existingAdmin.password = password;
-    }
-    await existingAdmin.save();
-    console.log(`Admin user ready: ${email}`);
+  // Generate a sensible admin username from ADMIN_NAME or email
+  const baseUsername = process.env.ADMIN_USERNAME ||
+    (process.env.ADMIN_NAME || '').toLowerCase().replace(/[^a-z0-9_\-]/g, '') ||
+    (email.split('@')[0] || '').toLowerCase().replace(/[^a-z0-9_\-]/g, '_') ||
+    'admin';
+
+  const existingAdminByEmail = email ? await User.findOne({ email }) : null;
+  const existingAdminByUsername = await User.findOne({ username: baseUsername });
+
+  let adminUser = existingAdminByEmail || existingAdminByUsername;
+
+  if (adminUser) {
+    adminUser.name = name;
+    adminUser.role = 'admin';
+    if (email && !adminUser.email) adminUser.email = email;
+    if (!adminUser.username) adminUser.username = baseUsername;
+    if (courtPlan) adminUser.plan = courtPlan._id;
+    if (password) adminUser.password = password;
+    await adminUser.save();
+    console.log(`Admin user ready: ${adminUser.username}${adminUser.email ? ` (${adminUser.email})` : ''}`);
     return;
+  }
+
+  let username = baseUsername;
+  let suffix = 0;
+  while (await User.findOne({ username })) {
+    suffix += 1;
+    username = `${baseUsername}${suffix}`;
   }
 
   await User.create({
     name,
+    username,
     email,
     password,
     role: 'admin',
     plan: courtPlan ? courtPlan._id : null,
   });
 
-  console.log(`Admin user created: ${email}`);
+  console.log(`Admin user created: ${username}${email ? ` (${email})` : ''}`);
 }
 
 async function assignMissingFreePlans() {

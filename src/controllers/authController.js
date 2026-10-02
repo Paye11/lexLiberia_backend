@@ -19,21 +19,39 @@ async function assignFreePlanIfMissing(user) {
 // @access  Public
 exports.register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, username, email, password } = req.body;
 
-    const userExists = await User.findOne({ email });
-    if (userExists) {
+    if (!name || !username || !password) {
       return res.status(400).json({
         success: false,
-        message: 'User already exists',
+        message: 'Please provide name, username, and password',
       });
+    }
+
+    const usernameExists = await User.findOne({ username });
+    if (usernameExists) {
+      return res.status(400).json({
+        success: false,
+        message: 'That username is already taken. Please choose another.',
+      });
+    }
+
+    if (email) {
+      const emailExists = await User.findOne({ email });
+      if (emailExists) {
+        return res.status(400).json({
+          success: false,
+          message: 'A user with that email already exists.',
+        });
+      }
     }
 
     const freePlan = await Plan.findOne({ name: 'Free' });
 
     const user = await User.create({
       name,
-      email,
+      username,
+      email: email || null,
       password,
       plan: freePlan ? freePlan._id : null,
     });
@@ -58,16 +76,20 @@ exports.register = async (req, res) => {
 // @access  Public
 exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { username, email, password } = req.body;
+    const identifier = username || email;
 
-    if (!email || !password) {
+    if (!identifier || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide an email and password',
+        message: 'Please provide a username and password',
       });
     }
 
-    const user = await User.findOne({ email }).select('+password');
+    // Allow login by username OR email (backward compatible)
+    const user = await User.findOne({
+      $or: [{ username: identifier }, { email: identifier }],
+    }).select('+password');
 
     if (!user) {
       return res.status(401).json({
@@ -156,20 +178,42 @@ exports.googleLogin = async (req, res) => {
     const email = String(profile.email || '').toLowerCase();
     const googleId = String(profile.sub || '');
     const name = String(profile.name || email.split('@')[0] || 'LexLiberia User');
+    const baseUsername = String(email.split('@')[0] || '').replace(/[^A-Za-z0-9_\-]/g, '_') || 'user';
 
     let user = await User.findOne({ $or: [{ googleId }, { email }] });
 
     if (!user) {
+      // Generate a unique username (since username is now required)
+      let username = baseUsername || 'googleuser';
+      let suffix = 0;
+      while (await User.findOne({ username })) {
+        suffix += 1;
+        username = `${baseUsername}${suffix}`;
+      }
+
       const freePlan = await Plan.findOne({ name: 'Free' });
       user = await User.create({
         name,
+        username,
         email,
         googleId,
         role: 'user',
         plan: freePlan ? freePlan._id : null,
       });
-    } else if (!user.googleId) {
-      user.googleId = googleId;
+    } else {
+      if (!user.googleId) {
+        user.googleId = googleId;
+      }
+      if (!user.username) {
+        // Backfill username for legacy accounts during Google login
+        let username = baseUsername || 'user';
+        let suffix = 0;
+        while (await User.findOne({ username }).then((found) => found && String(found._id) !== String(user._id))) {
+          suffix += 1;
+          username = `${baseUsername}${suffix}`;
+        }
+        user.username = username;
+      }
       await user.save();
     }
 

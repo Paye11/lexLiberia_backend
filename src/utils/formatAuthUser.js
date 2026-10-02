@@ -16,6 +16,7 @@ async function formatAuthUser(userDoc) {
   return {
     _id: user._id,
     name: user.name,
+    username: user.username,
     email: user.email,
     role: user.role,
     plan,

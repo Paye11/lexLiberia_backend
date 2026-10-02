@@ -29,7 +29,7 @@ exports.getUsers = async (req, res) => {
     const users = await User.find({ role: 'user' })
       .populate('plan', 'name priceMonthly')
       .sort('-createdAt')
-      .select('name email role plan planExpiresAt isActive createdAt');
+      .select('name username email role plan planExpiresAt isActive createdAt');
 
     const userIds = users.map((user) => user._id);
     const payments = await Payment.find({ user: { $in: userIds } })
@@ -49,6 +49,7 @@ exports.getUsers = async (req, res) => {
       return {
         _id: user._id,
         name: user.name,
+        username: user.username,
         email: user.email,
         role: user.role,
         plan: user.plan,
