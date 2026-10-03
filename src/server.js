@@ -19,19 +19,34 @@ const allowedOrigins = (process.env.CLIENT_URL || '')
   .map((origin) => origin.trim().replace(/\/$/, ''))
   .filter(Boolean);
 
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  const normalized = origin.replace(/\/$/, '');
+  if (allowedOrigins.includes(normalized)) return true;
+
+  // Allowed wildcards so Railway + Vercel deploys "just work" without manual re-listing:
+  //  - any *.vercel.app preview/production domain
+  //  - any *.up.railway.app domain
+  //  - localhost on any port
+  const host = normalized.toLowerCase();
+  if (host.endsWith('.vercel.app')) return true;
+  if (host.endsWith('.up.railway.app')) return true;
+  if (/^https?:\/\/localhost(:\d+)?$/.test(host)) return true;
+  if (/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(host)) return true;
+  return false;
+}
+
 app.use(cors({
   origin(origin, callback) {
-    if (!origin) {
+    if (isAllowedOrigin(origin)) {
       callback(null, true);
       return;
     }
 
-    const normalizedOrigin = origin.replace(/\/$/, '');
-    if (allowedOrigins.includes(normalizedOrigin)) {
-      callback(null, true);
-      return;
-    }
-
+    console.error(
+      `[CORS BLOCKED] origin=${origin || '(missing)'} | allowedOrigins=${JSON.stringify(allowedOrigins)} | ` +
+      `Go to Railway → lexLiberia_backend → Variables → edit CLIENT_URL value and append the following exact string before the comma: ${origin || ''}`,
+    );
     callback(new Error(`CORS blocked for origin: ${origin}`));
   },
   credentials: true,

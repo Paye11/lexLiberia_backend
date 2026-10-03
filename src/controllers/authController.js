@@ -86,9 +86,17 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Allow login by username OR email (backward compatible)
+    const normalizedIdentifier = String(identifier || '').trim();
+    const lowerIdentifier = normalizedIdentifier.toLowerCase();
+
+    // Allow login by username OR email (backward compatible), case-insensitive
     const user = await User.findOne({
-      $or: [{ username: identifier }, { email: identifier }],
+      $or: [
+        { username: normalizedIdentifier },
+        { username: lowerIdentifier },
+        { email: lowerIdentifier },
+        { email: normalizedIdentifier },
+      ],
     }).select('+password');
 
     if (!user) {

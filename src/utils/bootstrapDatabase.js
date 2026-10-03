@@ -75,14 +75,11 @@ async function seedPlansIfEmpty() {
 }
 
 async function ensureAdminUser() {
-  const email = process.env.ADMIN_EMAIL;
-  const password = process.env.ADMIN_PASSWORD;
-
-  if (!password || !email) {
-    console.log('ADMIN_EMAIL or ADMIN_PASSWORD not set — skipping admin bootstrap.');
-    return;
-  }
-
+  // Fallback defaults so a brand-new Railway deploy without explicit ADMIN_* env vars
+  // still has a working admin user (matches the credentials user expected from Render).
+  // If the user explicitly provides ADMIN_EMAIL / ADMIN_PASSWORD those take precedence.
+  const email = process.env.ADMIN_EMAIL || 'billadmin@lexliberia.com';
+  const password = process.env.ADMIN_PASSWORD || 'Admin123!';
   const name = process.env.ADMIN_NAME || 'LexLiberia Admin';
   const courtPlan = await Plan.findOne({ name: 'Court' });
 
