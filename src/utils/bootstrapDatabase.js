@@ -101,8 +101,9 @@ async function ensureAdminUser() {
     if (!adminUser.username) adminUser.username = baseUsername;
     if (courtPlan) adminUser.plan = courtPlan._id;
     if (password) adminUser.password = password;
+    adminUser.markModified('password');
     await adminUser.save();
-    console.log(`Admin user ready: ${adminUser.username}${adminUser.email ? ` (${adminUser.email})` : ''}`);
+    console.log(`Admin user ready: ${adminUser.username}${adminUser.email ? ` (${adminUser.email})` : ''} (updated)`);
     return;
   }
 
@@ -113,7 +114,7 @@ async function ensureAdminUser() {
     username = `${baseUsername}${suffix}`;
   }
 
-  await User.create({
+  const created = await User.create({
     name,
     username,
     email,
@@ -121,8 +122,7 @@ async function ensureAdminUser() {
     role: 'admin',
     plan: courtPlan ? courtPlan._id : null,
   });
-
-  console.log(`Admin user created: ${username}${email ? ` (${email})` : ''}`);
+  console.log(`Admin user ready: ${created.username}${created.email ? ` (${created.email})` : ''} (created)`);
 }
 
 async function assignMissingFreePlans() {
