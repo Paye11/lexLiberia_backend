@@ -64,7 +64,30 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
+function validateStartupEnv() {
+  const missing = [];
+  if (!process.env.MONGODB_URI && !process.env.MONGO_URI && !process.env.DATABASE_URL) {
+    missing.push('MONGODB_URI (or MONGO_URI / DATABASE_URL) → MongoDB Atlas connection string');
+  }
+  if (!process.env.JWT_SECRET) {
+    missing.push('JWT_SECRET → long random string for signing auth tokens');
+  }
+  if (!process.env.CLIENT_URL) {
+    missing.push('CLIENT_URL → comma-separated list of frontend domains, e.g. https://your-vercel-domain.vercel.app,http://localhost:3000');
+  }
+  if (missing.length > 0) {
+    console.error('');
+    console.error('❌ Startup stopped — missing required environment variables:');
+    missing.forEach((m) => console.error(`   • ${m}`));
+    console.error('');
+    console.error('👉 Go to Railway → lexLiberia_backend service → Variables tab, add all the above, then click Restart.');
+    console.error('');
+    process.exit(1);
+  }
+}
+
 async function startServer() {
+  validateStartupEnv();
   await connectDB();
   try {
     await bootstrapDatabase();
@@ -73,7 +96,7 @@ async function startServer() {
   }
 
   app.listen(PORT, () => {
-    console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+    console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
   });
 }
 
