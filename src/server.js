@@ -24,12 +24,14 @@ function isAllowedOrigin(origin) {
   const normalized = origin.replace(/\/$/, '');
   if (allowedOrigins.includes(normalized)) return true;
 
-  // Allowed wildcards so Railway + Vercel deploys "just work" without manual re-listing:
+  // Allowed wildcards so Render + Railway + Vercel deploys "just work" without manual re-listing:
   //  - any *.vercel.app preview/production domain
+  //  - any *.onrender.com backend preview / production domain
   //  - any *.up.railway.app domain
   //  - localhost on any port
   const host = normalized.toLowerCase();
   if (host.endsWith('.vercel.app')) return true;
+  if (host.endsWith('.onrender.com')) return true;
   if (host.endsWith('.up.railway.app')) return true;
   if (/^https?:\/\/localhost(:\d+)?$/.test(host)) return true;
   if (/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(host)) return true;
@@ -45,7 +47,7 @@ app.use(cors({
 
     console.error(
       `[CORS BLOCKED] origin=${origin || '(missing)'} | allowedOrigins=${JSON.stringify(allowedOrigins)} | ` +
-      `Go to Railway → lexLiberia_backend → Variables → edit CLIENT_URL value and append the following exact string before the comma: ${origin || ''}`,
+      `Go to Render/Railway → lexLiberia_backend → Variables → edit CLIENT_URL value and append the following exact string before the comma: ${origin || ''}`,
     );
     callback(new Error(`CORS blocked for origin: ${origin}`));
   },
