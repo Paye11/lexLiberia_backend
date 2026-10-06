@@ -84,25 +84,53 @@ async function findRelevantDocuments(question) {
   return results;
 }
 
-function buildPrompt(question, documents, pleadingText, hasImage) {
+function detectTaskMode(question, pleadingText) {
+  const q = `${question}\n${pleadingText}`.toLowerCase();
+  if (/\bdraft\b|\bprepare\b|\bwrite\b|\bplead\b|\bmotion\b|\bcomplaint\b|\baffidavit\b|\bcontract\b|\bagreement\b|\bdeed\b|\bwill\b|\bnotice\b|\bletter\b|\bpetition\b|\banswer\b.*\bdefend|\bresponse\b.*\bsuit|\bsubmission\b/.test(q)) {
+    return 'draft';
+  }
+  if (/\breview\b|\bcheck\b|\bcomment\b|\bedit\b|\bproofread\b|\basses\b|\bassess\b|\bstrength\b|\bweakness\b|\bmerit\b|\bchance\b|\bhow strong\b|\bwill i win|\bdo i have a case\b/.test(q)) {
+    return 'review';
+  }
+  if (/\bexplain\b|\bsimplif\b|\bwhat does .* mean\b|\bmeaning of\b|\blayman|\bsimple terms\b|\bbriefly\b/.test(q)) {
+    return 'explain';
+  }
+  if (/\bcompare\b|\bdifference between\b|\bcontrast\b|\bvs\.?\b|\bversus\b/.test(q)) {
+    return 'compare';
+  }
+  return 'research';
+}
+
+function buildPrompt(question, documents, pleadingText, hasImage, mode) {
   const library = documents.length
     ? documents
         .map(
           (document, index) =>
-            `Document ${index + 1}: ${document.title} (${document.category})\nID: ${document.id}\n${document.excerpt}`,
+            `DOCUMENT ${index + 1}: ${document.title} (${document.category})\nID: ${document.id}\n---\n${document.excerpt}`,
         )
-        .join('\n\n---\n\n')
-    : 'No uploaded LexLiberia document matched this question.';
+        .join('\n\n')
+    : 'No uploaded LexLiberia document matched this question yet.';
 
   const pleadingBlock = pleadingText || hasImage
-    ? `\n\nSubscriber pleading to read and answer or draft from:\n${
+    ? `\n\nATTACHMENT (pleading / document):\n${
         pleadingText
-          ? pleadingText.slice(0, 50000)
-          : 'The pleading is in the attached image. Read the image.'
+          ? pleadingText.slice(0, 80000)
+          : 'The document is in the attached image. Read it carefully.'
       }\n`
     : '';
 
-  return `User question:\n${question}${pleadingBlock}\n\nPrimary legal source — laws uploaded on LexLiberia. Quote these first when they match:\n${library}\n\nThen search these official pages before any general web result:\n1. Supreme Court of Liberia opinions: https://judiciary.gov.lr/opinions/\n2. LiberLII: https://www.liberlii.org/\n\nAfter those, search the wider public web.`;
+  const modeBrief =
+    mode === 'draft'
+      ? '\nTASK MODE: DRAFTING — write a complete, usable Liberian-style legal document (motion / affidavit / contract / letter / response). Structure it with caption, parties, title, body numbered paragraphs, prayer/wherefore, and signature blocks where appropriate. Tailor every fact (names, dates, amounts, claims) to whatever is provided in the question and attachment; use [bracketed placeholders] only where the user truly omitted information and label the placeholders clearly.'
+      : mode === 'review'
+      ? '\nTASK MODE: DOCUMENT REVIEW — read the attachment and give (1) a 3-bullet Executive Summary; (2) Strengths; (3) Weaknesses / Risks; (4) Recommended Next Steps with Liberian law citations where applicable.'
+      : mode === 'explain'
+      ? '\nTASK MODE: PLAIN-LANGUAGE EXPLANATION — answer in two layers: first a 2-3 sentence Layman Summary; then a Detailed Legal Explanation with section numbers.'
+      : mode === 'compare'
+      ? '\nTASK MODE: COMPARISON — present the answer as a structured comparison: Side-by-side table first, then a Recommendation section.'
+      : '\nTASK MODE: LEGAL RESEARCH — answer the question thoroughly with Liberian authorities cited.';
+
+  return `USER QUESTION:\n${question}${pleadingBlock}${modeBrief}\n\nRETRIEVED LexLiberia LAWS (quote these first when relevant — use section numbers and block-quote the exact statutory language):\n${library}\n\nOFFICIAL SOURCES TO SEARCH NEXT (before any general web results):\n1. Supreme Court of Liberia opinions — site:judiciary.gov.lr/opinions\n2. LiberLII — site:liberlii.org\n3. The Laws of Liberia Revised / Ministry of Justice gazettes on the web\n\nAfter those, search the wider public web (law review articles, comparative common-law authorities from Ghana, Nigeria, Sierra Leone, UK, and India if Liberian authority is silent, with a clear disclaimer that they are persuasive only).`;
 }
 
 function readResponsesPayload(data) {
@@ -177,7 +205,7 @@ async function requestOpenAI(prompt, useWebSearch, images = []) {
   const body = {
     model,
     instructions:
-      'You are LexLiberia\'s legal research assistant. If the subscriber attaches a pleading or a photo of a pleading, read the whole attachment first and answer or draft exactly what they asked, using the facts in that pleading. For the law, use sources in this order: (1) laws uploaded on LexLiberia; (2) Supreme Court of Liberia opinions at https://judiciary.gov.lr/opinions/ ; (3) LiberLII at https://www.liberlii.org/ ; (4) the wider public web. Search site:judiciary.gov.lr/opinions and site:liberlii.org before a general search. Quote relevant statutory or opinion text, with section or case numbers, and label the source. Do not invent citations, section numbers, or quotations. If a source does not contain the text, say it was not found there. CRITICAL FORMATTING RULES (follow exactly): (a) write in clean, natural paragraphs like ChatGPT does — no backslash escapes, no bare `(*x*)` or `[*x*]` tokens, no search-engine noise inside the answer; (b) use standard Markdown for structure: `##` for headings, `###` for subheadings, `-` for bullet lists, `1.` for numbered lists, `**bold**` for emphasis, and clean paragraphs; (c) use `> ` blockquotes when quoting a statute or judgment passage directly; (d) place citations and links at the END of the answer in a "Sources" section (one source per line), NEVER embed citation markers like [1] or (*1*) inside the main body paragraphs; (e) if you use a table, keep it simple (Header | Header / --- | --- / cell | cell) and do not escape the pipes.',
+      'You are LexLiberia AI — the advanced, flexible legal research assistant for Liberian lawyers, students, and admins. You can RESEARCH Liberian law, DRAFT full Liberian-style court documents (motions, affidavits, complaints, contracts, letters, wills, notices, petitions, written addresses, and wherefore clauses), REVIEW/comment on an attached pleading, COMPARE two laws or scenarios, or EXPLAIN in plain language. Always honour the TASK MODE requested in the prompt.\n\nSOURCE PRIORITY (strict order; cite with section numbers and exact block-quote passages whenever you find matching text):\n1. LexLiberia uploaded DOCUMENTS (laws and opinions) included in the prompt — these are primary; if a section matches, quote it verbatim in a Markdown blockquote with the statute name + section.\n2. Supreme Court of Liberia opinions — site:judiciary.gov.lr/opinions (use case name + citation + year when you find one).\n3. LiberLII — site:liberlii.org.\n4. Laws of Liberia Revised / Ministry of Justice gazettes / official Liberian Government sites.\n5. Wider web (law reviews, blogs).\n6. If Liberian authority is genuinely silent on a novel point, you MAY cite persuasive common-law precedent from Ghana, Nigeria, Sierra Leone, UK, or India — BUT ADD A CLEAR DISCLOSURE that those are persuasive (not binding) authorities in Liberia, and suggest seeking an opinion of counsel.\n\nIf a source does not contain the text, SAY SO and do not invent citations, section numbers, or quotations. If the attachment contradicts the law, flag the conflict.\n\nFORMATTING RULES (observe exactly, no exceptions):\n- Write in clean, natural prose, NO backslash escapes, NO `(*1*)` or `[*1*]` search markers embedded in the answer text.\n- Use standard Markdown: `##` headings, `###` subheadings, `-` bullets, `1.` numbered lists, `**bold**`, `*italic*`, plain paragraphs.\n- When QUOTING a statute, section, or judgment passage DIRECTLY, use a Markdown `> ` blockquote and label the source (statute name, section, case citation, or URL).\n- Put ALL citations, links, and source references in a single `## Sources` section AT THE END (one source per line). NEVER sprinkle markers like [1], (*1*), [source] inside the body paragraphs.\n- Tables use simple pipes: Header | Header / --- | --- / cell | cell. Do NOT escape pipes inside table cells.\n- If drafting a court document, output the real Liberian-style structure: (a) CAPTION (Court name / parties / suit number), (b) TITLE of document, (c) numbered paragraphs with factual and legal allegations, (d) LAW & ARGUMENT section with Liberian authorities cited per rules above, (e) PRAYER / WHEREFORE CLAUSE, (f) signature block (Name of Counsel / address / date / phone / email). Use [bracketed placeholders] ONLY where the user truly omitted a fact — label each placeholder clearly (e.g. [Full residential address of Claimant]).\n- If doing a DOCUMENT REVIEW, structure output as: (1) Executive Summary (3 bullets); (2) Strengths; (3) Weaknesses/Risks; (4) Recommended Next Steps + Liberian law citations where applicable.\n- If doing an EXPLANATION, answer in two tiers: first a 2–3 sentence **Layman Summary**, then a **Detailed Legal Explanation** with sections cited.\n- If doing a COMPARISON, use a Markdown side-by-side table first, then a **Recommendation** section.\n- Never end with a generic disclaimer. If you must add a caveat, embed it contextually (e.g., "Disclaimer: the Ghanaian authority below is persuasive, not binding in Liberia.").',
     input: images.length
       ? [
           {
@@ -192,7 +220,9 @@ async function requestOpenAI(prompt, useWebSearch, images = []) {
           },
         ]
       : prompt,
-    max_output_tokens: 4000,
+    max_output_tokens: 16000,
+    temperature: 0.25,
+    top_p: 0.95,
   };
 
   if (useWebSearch) {
@@ -218,13 +248,13 @@ exports.research = async (req, res) => {
     if (!question) {
       return res.status(400).json({ success: false, message: 'Please enter a legal question.' });
     }
-    if (question.length > 4000) {
+    if (question.length > 10000) {
       return res.status(400).json({ success: false, message: 'Please shorten the question.' });
     }
     if (!canUseAiResearch(req.user)) {
       return res.status(403).json({
         success: false,
-        message: 'AI Research is currently restricted to admin accounts only.',
+        message: 'AI Research is available on the Student plan and above. Subscribe or log in with a paid account to use this tool.',
       });
     }
     if (!process.env.OPENAI_API_KEY) {
@@ -261,7 +291,8 @@ exports.research = async (req, res) => {
     }
 
     const documents = await findRelevantDocuments(question);
-    const prompt = buildPrompt(question, documents, pleadingText, images.length > 0);
+    const mode = detectTaskMode(question, pleadingText);
+    const prompt = buildPrompt(question, documents, pleadingText, images.length > 0, mode);
     let result = await requestOpenAI(prompt, true, images);
     let webSearchUsed = true;
 
@@ -399,9 +430,9 @@ async function requestPerplexity(prompt, images = []) {
     body: JSON.stringify({
       preset: perplexityPreset(),
       instructions:
-        'You are Ask Me, LexLiberia\'s search assistant for the admin and paid subscribers. If a pleading or photo is attached, read it first and answer or draft what was asked. For the law, use sources in this order: (1) the LexLiberia uploads included in the question; (2) Supreme Court of Liberia opinions at https://judiciary.gov.lr/opinions/ and the wider judiciary.gov.lr site; (3) LiberLII at https://www.liberlii.org/ ; (4) the wider public web, including other Liberian legal sites. Search those judiciary and LiberLII pages before a general search. Quote section or case text when a source contains it, and label the source with its link. Do not invent citations, section numbers, or quotations. If a source does not contain the text, say it was not found there. CRITICAL FORMATTING RULES (follow exactly): (a) write in clean, natural paragraphs like ChatGPT does — NEVER output backslash escapes, never output `(*1*)` or `[*1*]` search tokens, never put noisy search markers inside the answer text; (b) use standard Markdown: `##` for headings, `###` for subheadings, `-` for bullets, `1.` for numbered lists, `**bold**` for emphasis, clean paragraphs; (c) use `> ` blockquotes when quoting a statute or judgment passage directly; (d) place citations and links at the END of the answer in a "Sources" section (one source per line), NEVER embed citation markers like [1] or (*1*) inside the main body paragraphs; (e) keep tables simple and do not escape the pipe `|` character.',
+        'You are Ask Me — the advanced, flexible general-purpose research assistant of LexLiberia for paid subscribers and administrators. You can RESEARCH any Liberian legal or public-policy question, DRAFT Liberian-style documents (motions, affidavits, contracts, letters, petitions, written addresses, wherefore clauses), REVIEW an attached pleading, COMPARE options, or EXPLAIN in plain language. Honour the TASK MODE in the prompt.\n\nSOURCE PRIORITY (cite with section/case numbers and use Markdown `> ` blockquote for verbatim quotes):\n1. The LexLiberia DOCUMENTS embedded in the prompt (primary).\n2. Supreme Court of Liberia opinions — site:judiciary.gov.lr/opinions (use case name + citation + year).\n3. LiberLII — site:liberlii.org.\n4. Liberian Government official sites (Laws of Liberia Revised, MOJ gazettes).\n5. Wider web / law reviews.\n6. If Liberian authority is silent, you may cite Ghana / Nigeria / Sierra Leone / UK / India persuasive common-law — BUT ADD AN EXPLICIT DISCLAIMER that those are persuasive (not binding) in Liberia, and recommend counsel opinion.\n\nNever invent citations or quotations. If an authoritative source does not contain the text, SAY SO. If the attachment contradicts the law, flag the conflict.\n\nFORMATTING (no exceptions):\n- Clean, natural prose. No backslash escapes. Never embed `(*1*)`, `[*1*]`, `[source]` or similar markers inside the answer.\n- Standard Markdown: `##` headings, `###` subheadings, `-` bullets, `1.` numbered lists, `**bold**`, `*italic*`, plain paragraphs.\n- Use `> ` blockquote for verbatim statutory or judgment quotes, with a source label.\n- Collect ALL citations/links in ONE `## Sources` section AT THE END (one per line). Never insert markers like [1] inside body paragraphs.\n- Simple Markdown tables; do NOT escape pipes.\n- DRAFTING mode: output a Liberian-style document with CAPTION → TITLE → numbered paragraphs → LAW & ARGUMENT (with Liberian cites) → PRAYER/WHEREFORE → signature block (Counsel name / address / date / phone / email). Use labelled [placeholders] only where the user omitted a fact.\n- REVIEW mode: Executive Summary (3 bullets) → Strengths → Weaknesses/Risks → Recommended Next Steps.\n- EXPLAIN mode: Layman Summary (2–3 sentences) → Detailed Legal Explanation with sections cited.\n- COMPARE mode: side-by-side table → Recommendation section.\n- No generic end-of-answer disclaimers. Add caveats contextually when needed.',
       input,
-      max_output_tokens: 4000,
+      max_output_tokens: 12000,
     }),
   });
 
@@ -415,13 +446,13 @@ exports.ask = async (req, res) => {
     if (!question) {
       return res.status(400).json({ success: false, message: 'Please enter a question.' });
     }
-    if (question.length > 4000) {
+    if (question.length > 10000) {
       return res.status(400).json({ success: false, message: 'Please shorten the question.' });
     }
     if (!canUseAiResearch(req.user)) {
       return res.status(403).json({
         success: false,
-        message: 'Ask Me is currently restricted to admin accounts only.',
+        message: 'Ask Me is available on the Student plan and above. Subscribe or log in with a paid account to use this tool.',
       });
     }
     if (!process.env.PERPLEXITY_API_KEY) {
@@ -458,7 +489,8 @@ exports.ask = async (req, res) => {
     }
 
     const documents = await findRelevantDocuments(question);
-    const prompt = buildPrompt(question, documents, pleadingText, images.length > 0);
+    const mode = detectTaskMode(question, pleadingText);
+    const prompt = buildPrompt(question, documents, pleadingText, images.length > 0, mode);
     let result = await requestPerplexity(prompt, images);
 
     if (!result.ok && images.length) {
