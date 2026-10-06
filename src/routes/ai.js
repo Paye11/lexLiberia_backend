@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const { research, ask } = require('../controllers/aiController');
-const { protect } = require('../middleware/auth');
+const { protect, authorize } = require('../middleware/auth');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -24,7 +24,7 @@ const upload = multer({
 
 const router = express.Router();
 
-router.post('/research', protect, (req, res, next) => {
+router.post('/research', protect, authorize('admin'), (req, res, next) => {
   upload.single('attachment')(req, res, (error) => {
     if (!error) {
       next();
@@ -39,7 +39,7 @@ router.post('/research', protect, (req, res, next) => {
   });
 }, research);
 
-router.post('/ask', protect, (req, res, next) => {
+router.post('/ask', protect, authorize('admin'), (req, res, next) => {
   upload.single('attachment')(req, res, (error) => {
     if (!error) {
       next();

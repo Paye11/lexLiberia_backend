@@ -224,7 +224,7 @@ exports.research = async (req, res) => {
     if (!canUseAiResearch(req.user)) {
       return res.status(403).json({
         success: false,
-        message: 'AI Research is available to the admin and to subscribers on a paid plan.',
+        message: 'AI Research is currently restricted to admin accounts only.',
       });
     }
     if (!process.env.OPENAI_API_KEY) {
@@ -421,7 +421,7 @@ exports.ask = async (req, res) => {
     if (!canUseAiResearch(req.user)) {
       return res.status(403).json({
         success: false,
-        message: 'Ask Me is available to the admin and to subscribers on a paid plan.',
+        message: 'Ask Me is currently restricted to admin accounts only.',
       });
     }
     if (!process.env.PERPLEXITY_API_KEY) {

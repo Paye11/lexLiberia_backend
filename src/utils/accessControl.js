@@ -24,8 +24,7 @@ function canAccessPremiumContent(user) {
 }
 
 function canUseAiResearch(user) {
-  if (isAdmin(user)) return true;
-  return hasPaidPlan(user);
+  return isAdmin(user);
 }
 
 module.exports = {
